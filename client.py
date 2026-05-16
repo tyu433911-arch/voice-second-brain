@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QPushButton, QVBoxLayou
 import websockets
 
 # WebSocket server endpoint URL
-SERVER_URL = "ws://127.0.0.1:8000/ws/chat"
+SERVER_URL = "wss://voice-second-brain-production.up.railway.app/ws/chat"
 
 
 class AudioBackendWorker(QThread):
@@ -63,16 +63,19 @@ class AudioBackendWorker(QThread):
 
     def listen_to_microphone(self) -> str:
         """Captures audio streams and transcribes them when the user pauses talking."""
+        print("-> Микрофон активирован, слушаю...")  # ОТЛАДКА
         with self.microphone as source:
             try:
-                # Listens for speech phrases, auto-cutting logs on silence thresholds
                 audio = self.recognizer.listen(source, timeout=None, phrase_time_limit=10)
+                print("-> Аудио захвачено, отправляю в Google...")  # ОТЛАДКА
                 text = self.recognizer.recognize_google(audio, language="ru-RU")
+                print(f"-> Распознано: {text}")  # ОТЛАДКА
                 return text
             except sr.UnknownValueError:
-                # Catch-all block for ambient room clicking, breathing or noise
+                print("-> Google не понял звук (шум/тишина)")  # ОТЛАДКА
                 return ""
-            except Exception:
+            except Exception as e:
+                print(f"-> Ошибка микрофона: {e}")  # ОТЛАДКА
                 return ""
 
     async def receive_from_server(self, websocket):

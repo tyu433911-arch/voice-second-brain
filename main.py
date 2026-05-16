@@ -38,7 +38,7 @@ model = genai.GenerativeModel(
     )
 )
 # Start a persistent chat session to maintain conversation history
-chat_session = model.start_chat(history=[])
+#chat_session = model.start_chat(history=[])
 
 # Settings for Text-to-Speech
 VOICE = "ru-RU-DmitryNeural"
@@ -84,6 +84,9 @@ async def websocket_chat_endpoint(websocket: WebSocket):
     """Handles continuous WebSocket connection for real-time AI communication."""
     await websocket.accept()
     print("Client connected via WebSocket")
+
+    # ДОБАВЬ СТРОКУ СЮДА:
+    chat_session = model.start_chat(history=[])
 
     try:
         while True:
