@@ -1,0 +1,13 @@
+# Ignore virtual environment
+env/
+venv/
+
+# Ignore local secret configuration
+.env
+
+# Ignore temporary audio responses
+*.mp3
+
+# IDE files
+.idea/
+__pycache__/
