@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Second Brain - AI Interviewer</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1e1e2e;
+            color: #cdd6f4;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .container {
+            text-align: center;
+            max-width: 400px;
+            width: 100%;
+        }
+        h1 {
+            color: #cba6f7;
+            margin-bottom: 10px;
+        }
+        .status-box {
+            background-color: #313244;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            border: 1px solid #45475a;
+        }
+        .btn {
+            background-color: #89b4fa;
+            color: #11111b;
+            border: none;
+            padding: 15px 30px;
+            font-size: 18px;
+            font-weight: bold;
+            border-radius: 50px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(137, 180, 250, 0.3);
+            transition: transform 0.2s, background-color 0.2s;
+            width: 100%;
+        }
+        .btn:active {
+            transform: scale(0.98);
+        }
+        .btn.listening {
+            background-color: #f38ba8;
+            box-shadow: 0 4px 15px rgba(243, 139, 168, 0.3);
+        }
+        .btn.speaking {
+            background-color: #a6e3a1;
+            box-shadow: 0 4px 15px rgba(166, 227, 161, 0.3);
+        }
+        #transcript, #ai-text {
+            margin-top: 20px;
+            font-style: italic;
+            min-height: 40px;
+            color: #a6adc8;
+        }
+        #ai-text {
+            color: #b4befe;
+            font-style: normal;
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>AI Interviewer</h1>
+    <div class="status-box">
+        <span id="status">Disconnected</span>
+    </div>
+
+    <button id="action-btn" class="btn" onclick="toggleSession()">Start Conversation</button>
+
+    <p id="transcript">You: (Your speech will appear here...)</p>
+    <p id="ai-text">AI: (Waiting for you to speak...)</p>
+</div>
+
+<script>
+    let socket;
+    let recognition;
+    let isSessionActive = false;
+    let isAiSpeaking = false;
+
+    // Dynamically calculate the host PC's IP address based on how the phone opened this page
+    const hostIp = window.location.hostname;
+    const wsUrl = `ws://${hostIp}:8000/ws/chat`;
+
+    function initWebSocket() {
+        socket = new WebSocket(wsUrl);
+        socket.binaryType = "arraybuffer";
+
+        socket.onopen = () => {
+            document.getElementById('status').innerText = "Connected & Ready";
+            document.getElementById('status').style.color = "#a6e3a1";
+        };
+
+        socket.onclose = () => {
+            document.getElementById('status').innerText = "Disconnected";
+            document.getElementById('status').style.color = "#f38ba8";
+            stopSession();
+        };
+
+        socket.onmessage = async (event) => {
+            if (typeof event.data === "string") {
+                // Handle text response from Gemini
+                const data = JSON.parse(event.data);
+                if (data.type === "text") {
+                    document.getElementById('ai-text').innerText = "AI: " + data.content;
+                }
+            } else if (event.data instanceof ArrayBuffer) {
+                // Handle binary audio response from Edge-TTS
+                isAiSpeaking = true;
+                updateButtonState();
+
+                const blob = new Blob([event.data], { type: 'audio/mp3' });
+                const audioUrl = URL.createObjectURL(blob);
+                const audio = new Audio(audioUrl);
+
+                // Pause recognition while AI is speaking to prevent echo loops
+                if (recognition) recognition.stop();
+
+                await audio.play();
+
+                audio.onended = () => {
+                    isAiSpeaking = false;
+                    updateButtonState();
+                    // Resume listening to the user automatically after AI finishes speaking
+                    if (isSessionActive && recognition) {
+                        recognition.start();
+                    }
+                };
+            }
+        };
+    }
+
+    function initSpeechRecognition() {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            alert("Speech recognition is not supported in this browser. Please use Google Chrome or modern Android browser.");
+            return;
+        }
+
+        recognition = new SpeechRecognition();
+        recognition.lang = 'ru-RU';
+        recognition.continuous = false; // Process message when user pauses speaking
+        recognition.interimResults = false;
+
+        recognition.onstart = () => {
+            if (!isAiSpeaking) {
+                document.getElementById('status').innerText = "Listening to you...";
+                document.getElementById('status').style.color = "#89b4fa";
+                updateButtonState();
+            }
+        };
+
+        recognition.onresult = (event) => {
+            const textResult = event.results[0][0].transcript;
+            document.getElementById('transcript').innerText = "You: " + textResult;
+
+            // Send text data secretly over WebSocket to the server
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ text: textResult }));
+            }
+        };
+
+        recognition.onerror = (event) => {
+            console.error("Speech recognition error: ", event.error);
+        };
+
+        recognition.onend = () => {
+            // Keep the recognition channel open loop if the session is still active
+            if (isSessionActive && !isAiSpeaking) {
+                recognition.start();
+            }
+        };
+    }
+
+    function updateButtonState() {
+        const btn = document.getElementById('action-btn');
+        if (!isSessionActive) {
+            btn.innerText = "Start Conversation";
+            btn.className = "btn";
+        } else if (isAiSpeaking) {
+            btn.innerText = "AI is Speaking...";
+            btn.className = "btn speaking";
+        } else {
+            btn.innerText = "Listening... Speak Now";
+            btn.className = "btn listening";
+        }
+    }
+
+    function toggleSession() {
+        if (isSessionActive) {
+            stopSession();
+        } else {
+            startSession();
+        }
+    }
+
+    function startSession() {
+        isSessionActive = true;
+        initWebSocket();
+        initSpeechRecognition();
+        setTimeout(() => {
+            if (recognition && isSessionActive) recognition.start();
+        }, 1000);
+    }
+
+    function stopSession() {
+        isSessionActive = false;
+        isAiSpeaking = false;
+        if (socket) socket.close();
+        if (recognition) recognition.stop();
+        updateButtonState();
+    }
+</script>
+</body>
+</html>
