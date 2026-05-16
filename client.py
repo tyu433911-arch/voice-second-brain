@@ -40,7 +40,12 @@ class AudioBackendWorker(QThread):
     async def network_loop(self):
         self.status_changed.emit("Connecting to AI Brain server...")
         try:
-            async with websockets.connect(SERVER_URL) as websocket:
+            # Настраиваем бесконечный пинг, чтобы соединение не рвалось при молчании
+            async with websockets.connect(
+                SERVER_URL,
+                ping_interval=None,  # Отключаем автоматический пинг, чтобы он не спамил
+                ping_timeout=None    # Отключаем таймаут ожидания
+            ) as websocket:
                 self.status_changed.emit("Connected. Start speaking naturally...")
 
                 # Run the continuous server reader task concurrently
@@ -50,7 +55,12 @@ class AudioBackendWorker(QThread):
                     # Capture and transcribe voice input without freezing the socket
                     user_speech_text = await asyncio.to_thread(self.listen_to_microphone())
 
-                    if user_speech_text and self.is_running:
+                    # Пропускаем отправку, если строка пустая, и идем на следующий круг
+                    if not user_speech_text:
+                        await asyncio.sleep(0.1)
+                        continue
+
+                    if self.is_running:
                         self.text_received.emit("You", user_speech_text)
                         # Construct payload and stream it through the socket tunnel
                         payload = json.dumps({"text": user_speech_text})

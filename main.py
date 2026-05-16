@@ -90,7 +90,7 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 
     try:
         while True:
-            # 1. Receive text payload from the client application
+            # 1. Receive text payload from the client
             data = await websocket.receive_text()
             message_data = json.loads(data)
             user_text = message_data.get("text", "")
@@ -100,36 +100,39 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 
             print(f"User said: {user_text}")
 
-            # 2. Generate response from Gemini
-            response = chat_session.send_message(user_text)
-            ai_text = response.text
-            print(f"AI responded: {ai_text}")
+            try:
+                # 2. ИСПОЛЬЗУЕМ АСИНХРОННЫЙ ВЫЗОВ GEMINI
+                response = await chat_session.send_message_async(user_text)
+                ai_text = response.text
+                print(f"AI responded: {ai_text}")
 
-            # 3. Check if the response contains markdown links for Obsidian
-            if "[[" in ai_text or "]]" in ai_text:
-                # Offload blocking HTTP requests to a separate thread to prevent UI freezing
-                asyncio.to_thread(save_to_obsidian_via_api, ai_text)
+                # 3. ДОБАВЛЕН AWAIT (иначе падает цикл!)
+                if "[[" in ai_text or "]]" in ai_text:
+                    await asyncio.to_thread(save_to_obsidian_via_api, ai_text)
 
-            # 4. Generate audio file for the AI's response
-            audio_filename = f"temp_response_{datetime.now().timestamp()}.mp3"
-            await generate_speech(ai_text, audio_filename)
+                # 4. Generate audio
+                audio_filename = f"temp_response_{datetime.now().timestamp()}.mp3"
+                await generate_speech(ai_text, audio_filename)
 
-            # 5. Read the generated audio file into bytes
-            with open(audio_filename, "rb") as f:
-                audio_bytes = f.read()
+                # 5. Send data back
+                with open(audio_filename, "rb") as f:
+                    audio_bytes = f.read()
 
-            # 6. Send text metadata and binary audio stream back to the client
-            await websocket.send_text(json.dumps({"type": "text", "content": ai_text}))
-            await websocket.send_bytes(audio_bytes)
+                await websocket.send_text(json.dumps({"type": "text", "content": ai_text}))
+                await websocket.send_bytes(audio_bytes)
 
-            # 7. Cleanup the temporary audio file
-            if os.path.exists(audio_filename):
-                os.remove(audio_filename)
+                if os.path.exists(audio_filename):
+                    os.remove(audio_filename)
+
+            except Exception as internal_e:
+                # Если Gemini или TTS сбоит, мы НЕ закрываем веб-сокет,
+                # а просто пишем ошибку и ждем следующую фразу
+                print(f"Ошибка при обработке ответа: {internal_e}")
 
     except WebSocketDisconnect:
         print("Client disconnected from WebSocket")
     except Exception as e:
-        print(f"An error occurred in the WebSocket loop: {e}")
+        print(f"Критическая ошибка WebSocket: {e}")
         if not websocket.client_state.name == "DISCONNECTED":
             await websocket.close()
 
